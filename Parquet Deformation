@@ -1,0 +1,145 @@
+private void RunScript(double i_sz, double i_x, double i_y, Point3d i_attractor, double i_strength, double i_thick, ref object A, ref object B)
+  {
+    if (i_sz > 0)
+    {
+      Tiling t;
+      t = new Tiling(i_sz, i_x, i_y);
+      DataTree <NurbsCurve> nbsTree = new DataTree <NurbsCurve>();
+      DataTree <NurbsCurve> offsetTree = new DataTree<NurbsCurve>();
+
+      for (int i = 0; i < t.tileHex().BranchCount; i++)
+      {
+        Vector3d vCenPt = new Vector3d (t.tileHex().Branch(i)[0].CenterPoint());
+        NurbsCurve[] ends = new NurbsCurve[1];
+        Plane[] plns = new Plane [1];
+        GH_Path path = new GH_Path(i);
+        for (int j = 0; j < t.tileHex().Branch(0)[0].SegmentCount; j++)
+        {
+
+          Point3d pt = (t.tileHex().Branch(i)[0][j] + t.tileHex().Branch(i)[0][j + 1]) * 0.5; ///midPt of each segment of each hexagon
+          double di = pt.DistanceTo(i_attractor);
+          double rectMod = i_strength * di;
+          Vector3d tan = t.tileHex().Branch(i)[0].SegmentAt(j).UnitTangent;  ///Vector3d Tangent for proper orientation
+          Point3d pt2 = new Point3d(tan);
+          Point3d pt3 = new Point3d(vCenPt);
+          Plane pl = new Plane(pt, pt3, pt2);
+          plns[0] = pl;
+
+          NurbsCurve ncRect = rectCen(pl, rectMod, rectMod * 0.5).ToNurbsCurve();
+          if (j == 0)
+          {
+            NurbsCurve ncHex = t.tileHex().Branch(i)[0].ToNurbsCurve();
+            Curve[] start = Rhino.Geometry.Curve.CreateBooleanDifference(ncHex, ncRect, 0.001);
+            NurbsCurve phStart = start[0].ToNurbsCurve();
+            ends[0] = phStart;
+          }
+          else if (j != 0 && j % 2 == 0)
+          {
+            Curve[] even = Rhino.Geometry.Curve.CreateBooleanDifference(ends[0], ncRect, 0.001);
+            NurbsCurve phEven = even[0].ToNurbsCurve();
+            ends[0] = phEven; /// Lista temporal
+          }else{
+            List<Curve> crvL = new List <Curve>();
+            crvL.Add(ends[0]);  /// Lista temporal
+            crvL.Add(ncRect);
+            Curve[] odd = Rhino.Geometry.Curve.CreateBooleanUnion(crvL, 0.001);
+            NurbsCurve phOdd = odd[0].ToNurbsCurve();
+            ends[0] = phOdd;  /// Lista temporal
+            crvL.Clear();
+          }
+        }
+        //offset interno?
+        nbsTree.Add(ends[0], path);
+        Curve[] cOff = ends[0].Offset(plns[0], i_thick, 0.001, CurveOffsetCornerStyle.Sharp);
+        NurbsCurve ncOff = cOff[0].ToNurbsCurve();
+        offsetTree.Add(ncOff, path);
+
+      }
+      A = nbsTree;
+      B = offsetTree;
+    }
+  }
+
+  // <Custom additional code> 
+  Rectangle3d rectCen(Plane pl, double width, double height)
+  {
+    Point3d p1 = pl.PointAt(width * 0.5, height * 0.5, 0.0);
+    Point3d p2 = pl.PointAt(-width * 0.5, -height * 0.5, 0.0);
+    return new Rectangle3d(pl, p1, p2);
+  }
+
+  public class Tiling
+  {
+    double sz;
+    double xNum;
+    double yNum;
+
+    public Tiling(double _size, double _xNumCell, double _yNumCell)
+    {
+      this.sz = _size;
+      this.xNum = _xNumCell;
+      this.yNum = _yNumCell;
+    }
+
+    public DataTree<Polyline> tileHex ()  ////// MATRIX CREATION
+    {
+      double h = 2 * sz;
+      double w = Math.Sqrt(3) * sz;
+      double vertCent = h * 0.75;
+      double matX = w * xNum;
+      double matY = h * yNum;
+      int row = 0;
+      int i = 0;
+      DataTree <Polyline> hexTree = new DataTree<Polyline>();
+
+      for (double cenY = h; cenY <= matY; cenY += vertCent)
+      {
+        double offX = ((row % 2) == 0) ? w : w / 2;
+
+        for (double cenX = offX; cenX <= matX; cenX += w)
+        {
+          GH_Path path = new GH_Path(i);
+          hexTree.Add(new Hexagon(sz, cenX, cenY).UnHex(), path); ////EACH INSTANCE OF AN HEXAGON IN THE MATRIX
+          i++;
+        }
+        row++;
+      }
+      return hexTree;
+    }
+  }
+  ///////////////////////////////////
+  ////////// UNIT HEXAGON ///////////
+  ///////////////////////////////////
+  public class Hexagon
+  {
+    double cenX;
+    double cenY;
+    double size;
+    int sides;
+
+    public Hexagon(double _size, double _cenX, double _cenY)
+    {
+      this.cenX = _cenX;
+      this.cenY = _cenY;
+      this.size = _size;
+      sides = 6;
+    }
+
+    public Polyline UnHex()
+    {
+      Point3d[] pts = new Point3d[sides];
+
+      for (int i = 0; i < sides; i++)
+      {
+        double angle_deg = 60 * i - 30;
+        double angle_rad = Math.PI / 180 * angle_deg;
+        double edX = cenX + size * Math.Cos(angle_rad);
+        double edY = cenY + size * Math.Sin(angle_rad);
+        pts[i] = new Point3d(edX, edY, 0);
+      }
+
+      Polyline hexPoly = new Polyline(pts);
+      hexPoly.Add(pts[0]);
+      return hexPoly;
+    }
+  }
